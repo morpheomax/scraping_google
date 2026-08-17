@@ -1,0 +1,8 @@
+__pycache__/
+.venv/
+venv/
+outputs/
+state/
+*.xlsx
+*.csv
+visited_ids*.txt
