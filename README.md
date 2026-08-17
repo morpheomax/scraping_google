@@ -30,11 +30,11 @@ streamlit run app.py
 
 Desde la interfaz puedes:
 
-1. Elegir el pais.
+1. Elegir uno o mas paises.
 2. Definir `SEARCH_QUERIES` en un campo multilinea.
 3. Nombrar la campana.
 4. Ejecutar con o sin navegador visible.
-5. Descargar un Excel ordenado por pais.
+5. Descargar un Excel si es un pais, o un ZIP con un Excel por pais si son varios.
 
 ## Uso por consola
 
@@ -51,6 +51,7 @@ La ejecucion por consola usa los valores por defecto de `config.py`.
 - Estado de reanudacion en `state/`
 
 Los archivos de estado se separan por pais y campana para no mezclar corridas.
+Cada corrida genera un Excel independiente por pais.
 
 ## Estructura
 
