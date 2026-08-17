@@ -193,3 +193,19 @@ def get_country_config(country_name):
     if country_name not in COUNTRIES:
         raise ValueError(f"Pais no soportado: {country_name}")
     return COUNTRIES[country_name]
+
+
+def get_anchor_names(country_name):
+    return [anchor[0] for anchor in get_country_config(country_name)["anchors"]]
+
+
+def filter_anchors(country_name, selected_anchor_names=None):
+    anchors = get_country_config(country_name)["anchors"]
+    if not selected_anchor_names:
+        return anchors
+
+    selected_set = set(selected_anchor_names)
+    filtered = [anchor for anchor in anchors if anchor[0] in selected_set]
+    if not filtered:
+        raise ValueError(f"No hay anclas validas para {country_name}.")
+    return filtered

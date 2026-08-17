@@ -31,10 +31,12 @@ streamlit run app.py
 Desde la interfaz puedes:
 
 1. Elegir uno o mas paises.
-2. Definir `SEARCH_QUERIES` en un campo multilinea.
-3. Nombrar la campana.
-4. Ejecutar con o sin navegador visible.
-5. Descargar un Excel si es un pais, o un ZIP con un Excel por pais si son varios.
+2. Elegir cobertura de `Pais completo` o, si trabajas con un solo pais, limitarlo a ciudades especificas.
+3. Definir `SEARCH_QUERIES` en un campo multilinea.
+4. Nombrar la campana.
+5. Ejecutar con o sin navegador visible.
+6. Descargar un Excel si es un pais, o un ZIP con un Excel por pais si son varios.
+7. Convertir un CSV existente a Excel sin volver a scrapear.
 
 ## Uso por consola
 
@@ -49,6 +51,7 @@ La ejecucion por consola usa los valores por defecto de `config.py`.
 - CSV incremental en `outputs/csv/`
 - Excel final en `outputs/excel/`
 - Estado de reanudacion en `state/`
+- CSV subidos para conversion en `outputs/uploads/`
 
 Los archivos de estado se separan por pais y campana para no mezclar corridas.
 Cada corrida genera un Excel independiente por pais.
@@ -66,4 +69,4 @@ Cada corrida genera un Excel independiente por pais.
 - No usa la API oficial de Google Maps.
 - Google puede cambiar selectores o mostrar CAPTCHA.
 - Conviene empezar con `HEADLESS = False` si necesitas resolver un CAPTCHA manualmente.
-- El scraper deduplica por `place_id` dentro de cada campana.
+- El exportador deduplica por `place_id` y tambien por combinacion `nombre + direccion` cuando falta un identificador confiable.

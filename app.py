@@ -9,8 +9,8 @@ import pandas as pd
 import streamlit as st
 
 import config
-from countries import get_country_names
-from export_utils import load_and_clean_results
+from countries import get_anchor_names, get_country_names
+from export_utils import export_country_excel, load_and_clean_results
 from scraper import run_scraper, slugify
 
 
@@ -23,122 +23,184 @@ def parse_queries(raw_text):
     return [line.strip() for line in raw_text.splitlines() if line.strip()]
 
 
-default_queries = "\n".join(config.SEARCH_QUERIES)
-default_country = config.DEFAULT_COUNTRY
-country_names = get_country_names()
-selected_countries = st.multiselect(
-    "Paises",
-    country_names,
-    default=[default_country],
-)
-campaign_name = st.text_input("Nombre de campana", value=config.DEFAULT_CAMPAIGN_NAME)
-queries_text = st.text_area("SEARCH_QUERIES (una por linea)", value=default_queries, height=180)
+def render_results(results, campaign_name):
+    total_found = sum(item.get("total_found", 0) for item in results)
+    total_new = sum(item.get("total_new", 0) for item in results)
+    total_exported = sum(item.get("total_exported", 0) for item in results)
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    headless = st.checkbox("Headless", value=config.HEADLESS)
-with col2:
-    visit_details = st.checkbox("Visitar detalle", value=config.VISIT_DETAILS)
-with col3:
-    max_scrolls = st.number_input("Max scrolls por busqueda", min_value=5, max_value=100, value=config.MAX_SCROLLS_PER_SEARCH)
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Paises procesados", len(results))
+    metric2.metric("Fichas encontradas", total_found)
+    metric3.metric("Fichas nuevas", total_new)
+    metric4.metric("Filas exportadas", total_exported)
 
-run_button = st.button("Iniciar scraping", type="primary")
+    summary_rows = []
+    preview_frames = []
+    for result in results:
+        csv_path = Path(result["csv_path"])
+        dataframe = load_and_clean_results(csv_path)
+        preview_frames.append(dataframe)
+        summary_rows.append({
+            "pais": result["country"],
+            "campana": result["campaign"],
+            "queries": len(result.get("queries", [])),
+            "anclas": result.get("anchors_used", 0),
+            "fichas_encontradas": result.get("total_found", 0),
+            "fichas_nuevas": result.get("total_new", 0),
+            "filas_exportadas": result.get("total_exported", len(dataframe)),
+            "csv": result["csv_path"],
+            "excel": result["excel_path"],
+        })
 
-if run_button:
-    queries = parse_queries(queries_text)
-    if not selected_countries:
-        st.error("Debes seleccionar al menos un pais.")
-    elif not queries:
-        st.error("Debes ingresar al menos una query.")
+    st.subheader("Resumen por pais")
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+    st.subheader("Vista previa consolidada")
+    preview_df = pd.concat(preview_frames, ignore_index=True) if preview_frames else pd.DataFrame()
+    st.dataframe(preview_df, use_container_width=True, height=500)
+
+    if len(results) == 1:
+        excel_path = Path(results[0]["excel_path"])
+        with excel_path.open("rb") as file_handle:
+            st.download_button(
+                "Descargar Excel",
+                data=file_handle.read(),
+                file_name=excel_path.name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
     else:
-        log_placeholder = st.empty()
-        log_lines = []
+        zip_buffer = BytesIO()
+        with ZipFile(zip_buffer, "w", ZIP_DEFLATED) as zip_file:
+            for result in results:
+                excel_path = Path(result["excel_path"])
+                zip_file.write(excel_path, arcname=excel_path.name)
+        st.download_button(
+            "Descargar Excels por pais (ZIP)",
+            data=zip_buffer.getvalue(),
+            file_name=f"excels_{slugify(campaign_name)}.zip",
+            mime="application/zip",
+        )
 
-        def push_log(message):
-            log_lines.append(message)
-            log_placeholder.code("\n".join(log_lines[-100:]), language="text")
+    for result in results:
+        st.caption(f"{result['country']} | CSV: {result['csv_path']}")
+        st.caption(f"{result['country']} | Excel: {result['excel_path']}")
 
-        try:
-            with st.spinner("Ejecutando scraping. Esto puede tardar bastante segun el pais y las queries."):
-                results = []
-                for country_name in selected_countries:
-                    push_log(f"=== Iniciando corrida para {country_name} ===")
-                    result = run_scraper(
-                        country_name=country_name,
-                        search_queries=queries,
-                        campaign_name=campaign_name,
-                        headless=headless,
-                        visit_details=visit_details,
-                        max_scrolls=int(max_scrolls),
-                        log_callback=push_log,
-                    )
-                    results.append(result)
-        except Exception as exc:
-            st.error(f"La corrida fallo: {exc}")
-            st.stop()
 
-        st.success("Scraping finalizado")
+scrape_tab, convert_tab = st.tabs(["Scraping", "Convertir CSV a Excel"])
 
-        total_found = sum(item["total_found"] for item in results)
-        total_new = sum(item["total_new"] for item in results)
-        total_exported = sum(item["total_exported"] for item in results)
+with scrape_tab:
+    default_queries = "\n".join(config.SEARCH_QUERIES)
+    default_country = config.DEFAULT_COUNTRY
+    country_names = get_country_names()
+    selected_countries = st.multiselect(
+        "Paises",
+        country_names,
+        default=[default_country],
+    )
+    campaign_name = st.text_input("Nombre de campana", value=config.DEFAULT_CAMPAIGN_NAME)
+    queries_text = st.text_area("SEARCH_QUERIES (una por linea)", value=default_queries, height=180)
 
-        metric1, metric2, metric3, metric4 = st.columns(4)
-        metric1.metric("Paises procesados", len(results))
-        metric2.metric("Fichas encontradas", total_found)
-        metric3.metric("Fichas nuevas", total_new)
-        metric4.metric("Filas exportadas", total_exported)
+    coverage_mode = "Pais completo"
+    selected_anchors = []
+    if len(selected_countries) == 1:
+        coverage_mode = st.radio(
+            "Cobertura",
+            ["Pais completo", "Ciudades especificas"],
+            horizontal=True,
+        )
+        if coverage_mode == "Ciudades especificas":
+            selected_anchors = st.multiselect(
+                "Ciudades / anclas",
+                get_anchor_names(selected_countries[0]),
+                default=get_anchor_names(selected_countries[0])[:5],
+            )
+    elif len(selected_countries) > 1:
+        st.caption("Con varios paises seleccionados, la corrida usa automaticamente la cobertura de pais completo en cada uno.")
 
-        summary_rows = []
-        preview_frames = []
-        for result in results:
-            csv_path = Path(result["csv_path"])
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        headless = st.checkbox("Headless", value=config.HEADLESS)
+    with col2:
+        visit_details = st.checkbox("Visitar detalle", value=config.VISIT_DETAILS)
+    with col3:
+        max_scrolls = st.number_input("Max scrolls por busqueda", min_value=5, max_value=100, value=config.MAX_SCROLLS_PER_SEARCH)
+
+    run_button = st.button("Iniciar scraping", type="primary")
+
+    if run_button:
+        queries = parse_queries(queries_text)
+        if not selected_countries:
+            st.error("Debes seleccionar al menos un pais.")
+        elif not queries:
+            st.error("Debes ingresar al menos una query.")
+        elif len(selected_countries) == 1 and coverage_mode == "Ciudades especificas" and not selected_anchors:
+            st.error("Debes seleccionar al menos una ciudad o ancla.")
+        else:
+            log_placeholder = st.empty()
+            log_lines = []
+
+            def push_log(message):
+                log_lines.append(message)
+                log_placeholder.code("\n".join(log_lines[-100:]), language="text")
+
+            try:
+                with st.spinner("Ejecutando scraping. Esto puede tardar bastante segun el pais y las queries."):
+                    results = []
+                    for country_name in selected_countries:
+                        push_log(f"=== Iniciando corrida para {country_name} ===")
+                        anchor_names = None
+                        if len(selected_countries) == 1 and coverage_mode == "Ciudades especificas":
+                            anchor_names = selected_anchors
+                        result = run_scraper(
+                            country_name=country_name,
+                            search_queries=queries,
+                            selected_anchor_names=anchor_names,
+                            campaign_name=campaign_name,
+                            headless=headless,
+                            visit_details=visit_details,
+                            max_scrolls=int(max_scrolls),
+                            log_callback=push_log,
+                        )
+                        results.append(result)
+            except Exception as exc:
+                st.error(f"La corrida fallo: {exc}")
+                st.stop()
+
+            st.success("Scraping finalizado")
+            render_results(results, campaign_name)
+    else:
+        st.info("Configura uno o mas paises, elige si quieres pais completo o ciudades especificas, y luego inicia una corrida nueva.")
+
+with convert_tab:
+    st.write("Convierte un CSV existente a Excel limpio y ordenado sin volver a scrapear.")
+    uploaded_file = st.file_uploader("CSV de entrada", type=["csv"])
+    convert_campaign = st.text_input("Nombre base para el archivo", value="conversion")
+    convert_button = st.button("Convertir CSV a Excel")
+
+    if convert_button:
+        if uploaded_file is None:
+            st.error("Debes cargar un archivo CSV.")
+        else:
+            uploads_dir = Path(config.OUTPUT_DIR) / "uploads"
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = uploads_dir / uploaded_file.name
+            csv_path.write_bytes(uploaded_file.getbuffer())
+
+            excel_path = Path(config.OUTPUT_DIR) / "excel" / f"{slugify(convert_campaign)}_{csv_path.stem}.xlsx"
+            export_country_excel(csv_path, excel_path)
             dataframe = load_and_clean_results(csv_path)
-            preview_frames.append(dataframe)
-            summary_rows.append({
-                "pais": result["country"],
-                "campana": result["campaign"],
-                "queries": len(result["queries"]),
-                "anclas": result["anchors_used"],
-                "fichas_encontradas": result["total_found"],
-                "fichas_nuevas": result["total_new"],
-                "filas_exportadas": result["total_exported"],
-                "csv": result["csv_path"],
-                "excel": result["excel_path"],
-            })
 
-        st.subheader("Resumen por pais")
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+            st.success("Conversion finalizada")
+            st.metric("Filas exportadas", len(dataframe))
+            st.dataframe(dataframe, use_container_width=True, height=500)
 
-        st.subheader("Vista previa consolidada")
-        preview_df = pd.concat(preview_frames, ignore_index=True) if preview_frames else pd.DataFrame()
-        st.dataframe(preview_df, use_container_width=True, height=500)
-
-        if len(results) == 1:
-            excel_path = Path(results[0]["excel_path"])
             with excel_path.open("rb") as file_handle:
                 st.download_button(
-                    "Descargar Excel",
+                    "Descargar Excel convertido",
                     data=file_handle.read(),
                     file_name=excel_path.name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-        else:
-            zip_buffer = BytesIO()
-            with ZipFile(zip_buffer, "w", ZIP_DEFLATED) as zip_file:
-                for result in results:
-                    excel_path = Path(result["excel_path"])
-                    zip_file.write(excel_path, arcname=excel_path.name)
-            st.download_button(
-                "Descargar Excels por pais (ZIP)",
-                data=zip_buffer.getvalue(),
-                file_name=f"excels_{slugify(campaign_name)}.zip",
-                mime="application/zip",
-            )
 
-        for result in results:
-            st.caption(f"{result['country']} | CSV: {result['csv_path']}")
-            st.caption(f"{result['country']} | Excel: {result['excel_path']}")
-
-else:
-    st.info("Configura uno o mas paises y las queries para iniciar una corrida nueva.")
+            st.caption(f"CSV: {csv_path}")
+            st.caption(f"Excel: {excel_path}")

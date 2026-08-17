@@ -23,6 +23,14 @@ EXPORT_COLUMNS = [
 ]
 
 
+def build_fallback_key(row):
+    name = normalize_text(row.get("nombre", "")).lower()
+    address = normalize_text(row.get("direccion", "")).lower()
+    if not name and not address:
+        return ""
+    return f"{name}|{address}"
+
+
 def normalize_text(value):
     if value is None:
         return ""
@@ -68,8 +76,17 @@ def load_and_clean_results(csv_path):
         df[column] = df[column].map(normalize_text)
 
     df["telefono"] = df["telefono"].map(normalize_phone)
+    df["_fallback_key"] = df.apply(build_fallback_key, axis=1)
 
     df = df.drop_duplicates(subset=["place_id"], keep="first")
+    fallback_mask = df["_fallback_key"] != ""
+    df = pd.concat(
+        [
+            df.loc[~fallback_mask],
+            df.loc[fallback_mask].drop_duplicates(subset=["_fallback_key"], keep="first"),
+        ],
+        ignore_index=True,
+    )
     df = df.sort_values(
         by=["pais", "ancla_busqueda", "query", "nombre"],
         kind="stable",

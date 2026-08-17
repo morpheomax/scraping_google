@@ -13,7 +13,7 @@ from playwright.sync_api import TimeoutError as PWTimeout
 from playwright.sync_api import sync_playwright
 
 import config
-from countries import get_country_config
+from countries import filter_anchors, get_country_config
 from export_utils import export_country_excel, normalize_phone, normalize_text
 
 
@@ -186,6 +186,7 @@ def build_run_paths(country_name, campaign_name, output_dir=None, state_dir=None
 def run_scraper(
     country_name,
     search_queries,
+    selected_anchor_names=None,
     campaign_name=None,
     headless=None,
     visit_details=None,
@@ -197,6 +198,7 @@ def run_scraper(
     log_callback=None,
 ):
     country = get_country_config(country_name)
+    anchors = filter_anchors(country_name, selected_anchor_names)
     queries = [normalize_text(query) for query in search_queries if normalize_text(query)]
     if not queries:
         raise ValueError("Debes indicar al menos una SEARCH_QUERY.")
@@ -227,7 +229,7 @@ def run_scraper(
         search_page = context.new_page()
 
         for query in queries:
-            for anchor_name, lat, lng, zoom in country["anchors"]:
+            for anchor_name, lat, lng, zoom in anchors:
                 url = build_search_url(query, lat, lng, zoom, country.get("query_suffix", country_name))
                 log(f"[BUSCANDO] '{query}' en {anchor_name} -> {url}")
 
@@ -319,7 +321,7 @@ def run_scraper(
         "started_at": started_at,
         "finished_at": datetime.now().isoformat(timespec="seconds"),
         "queries": queries,
-        "anchors_used": len(country["anchors"]),
+        "anchors_used": len(anchors),
     }
 
 
