@@ -93,37 +93,66 @@ with scrape_tab:
     default_country = config.DEFAULT_COUNTRY
     country_names = get_country_names()
     selected_countries = st.multiselect(
-        "Paises",
+        "Paises a consultar",
         country_names,
         default=[default_country],
+        help="Puedes elegir uno o varios paises. Si eliges varios, cada pais se corre completo y se exporta en su propio archivo.",
     )
-    campaign_name = st.text_input("Nombre de campana", value=config.DEFAULT_CAMPAIGN_NAME)
-    queries_text = st.text_area("SEARCH_QUERIES (una por linea)", value=default_queries, height=180)
+    campaign_name = st.text_input(
+        "Nombre de campana",
+        value=config.DEFAULT_CAMPAIGN_NAME,
+        help="Nombre interno de la corrida. Se usa para nombrar archivos y separar el historial de visitados.",
+    )
+    queries_text = st.text_area(
+        "SEARCH_QUERIES (una por linea)",
+        value=default_queries,
+        height=180,
+        help="Escribe una busqueda por linea. Ejemplo: extintores, empresas contra incendio, fire protection.",
+    )
 
     coverage_mode = "Pais completo"
     selected_anchors = []
     if len(selected_countries) == 1:
         coverage_mode = st.radio(
-            "Cobertura",
+            "Cobertura geografica",
             ["Pais completo", "Ciudades especificas"],
             horizontal=True,
+            help="Pais completo usa todas las ciudades configuradas para ese pais. Ciudades especificas limita la corrida a las anclas seleccionadas.",
         )
         if coverage_mode == "Ciudades especificas":
             selected_anchors = st.multiselect(
                 "Ciudades / anclas",
                 get_anchor_names(selected_countries[0]),
                 default=get_anchor_names(selected_countries[0])[:5],
+                help="Selecciona solo las ciudades donde quieres buscar. Esto acelera la corrida cuando no necesitas cubrir todo el pais.",
             )
     elif len(selected_countries) > 1:
         st.caption("Con varios paises seleccionados, la corrida usa automaticamente la cobertura de pais completo en cada uno.")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        headless = st.checkbox("Headless", value=config.HEADLESS)
+        headless = st.checkbox(
+            "Ejecutar sin abrir navegador (Headless)",
+            value=config.HEADLESS,
+            help="Activado: el navegador corre oculto. Desactivado: ves la ventana del navegador, util para resolver CAPTCHA o revisar manualmente.",
+        )
     with col2:
-        visit_details = st.checkbox("Visitar detalle", value=config.VISIT_DETAILS)
+        visit_details = st.checkbox(
+            "Entrar a cada ficha para extraer telefono, web y direccion completa",
+            value=config.VISIT_DETAILS,
+            help="Activado: abre cada negocio para sacar mas datos. Desactivado: corre mas rapido, pero exporta menos informacion.",
+        )
     with col3:
-        max_scrolls = st.number_input("Max scrolls por busqueda", min_value=5, max_value=100, value=config.MAX_SCROLLS_PER_SEARCH)
+        max_scrolls = st.number_input(
+            "Maximo de scrolls por busqueda",
+            min_value=5,
+            max_value=500,
+            value=config.MAX_SCROLLS_PER_SEARCH,
+            step=5,
+            help="Controla cuantas veces se desplaza la lista de resultados en Google Maps. Para pais completo o rubros grandes, 80, 120 o mas puede ser necesario.",
+        )
+
+    st.caption("Sugerencia: si es tu primera corrida o Google te muestra CAPTCHA, desactiva el modo Headless para ver el navegador.")
 
     run_button = st.button("Iniciar scraping", type="primary")
 
@@ -164,6 +193,8 @@ with scrape_tab:
                         results.append(result)
             except Exception as exc:
                 st.error(f"La corrida fallo: {exc}")
+                if "playwright install chromium" in str(exc):
+                    st.info("Si tu entorno bloquea la descarga automatica del navegador, ejecuta `playwright install chromium` en la terminal del servidor o entorno donde corre Streamlit.")
                 st.stop()
 
             st.success("Scraping finalizado")

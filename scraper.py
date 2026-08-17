@@ -4,6 +4,8 @@
 import csv
 import random
 import re
+import subprocess
+import sys
 import time
 import urllib.parse
 from datetime import datetime
@@ -86,6 +88,31 @@ def extract_place_id(href):
 def build_search_url(query, lat, lng, zoom, query_suffix):
     effective_query = f"{normalize_text(query)} en {query_suffix}" if query_suffix else normalize_text(query)
     return f"https://www.google.com/maps/search/{urllib.parse.quote(effective_query)}/@{lat},{lng},{zoom}z"
+
+
+def ensure_chromium_installed(log_callback=None):
+    command = [sys.executable, "-m", "playwright", "install", "chromium"]
+    if log_callback:
+        log_callback("[SETUP] Chromium no esta instalado. Intentando descargarlo con Playwright...")
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+
+    if result.returncode != 0:
+        output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+        raise RuntimeError(
+            "No se pudo instalar Chromium automaticamente. "
+            "Ejecuta `playwright install chromium` y vuelve a intentar.\n"
+            f"Detalle:\n{output}"
+        )
+
+    if log_callback:
+        log_callback("[SETUP] Chromium instalado correctamente.")
 
 
 def scroll_and_collect_links(page, max_scrolls):
@@ -224,7 +251,14 @@ def run_scraper(
     started_at = datetime.now().isoformat(timespec="seconds")
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
+        try:
+            browser = playwright.chromium.launch(headless=headless)
+        except Exception as exc:
+            error_text = str(exc)
+            if "Executable doesn't exist" not in error_text and "Executable doesn't exist at" not in error_text:
+                raise
+            ensure_chromium_installed(log_callback=log_callback)
+            browser = playwright.chromium.launch(headless=headless)
         context = browser.new_context(locale=country["locale"])
         search_page = context.new_page()
 
