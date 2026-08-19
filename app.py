@@ -18,6 +18,8 @@ st.set_page_config(page_title="Google Maps Scraper", layout="wide")
 st.title("Google Maps Scraper")
 st.caption("Scraping por pais con exportacion a Excel ordenada")
 
+IS_HOSTED_STREAMLIT = config.is_hosted_streamlit_environment()
+
 
 def parse_queries(raw_text):
     return [line.strip() for line in raw_text.splitlines() if line.strip()]
@@ -133,8 +135,13 @@ with scrape_tab:
     with col1:
         headless = st.checkbox(
             "Ejecutar sin abrir navegador (Headless)",
-            value=config.HEADLESS,
-            help="Activado: el navegador corre oculto. Desactivado: ves la ventana del navegador, util para resolver CAPTCHA o revisar manualmente.",
+            value=True if IS_HOSTED_STREAMLIT else config.HEADLESS,
+            disabled=IS_HOSTED_STREAMLIT,
+            help=(
+                "En Streamlit web queda forzado para que Chromium pueda iniciar sin escritorio grafico."
+                if IS_HOSTED_STREAMLIT
+                else "Activado: el navegador corre oculto. Desactivado: ves la ventana del navegador, util para resolver CAPTCHA o revisar manualmente."
+            ),
         )
     with col2:
         visit_details = st.checkbox(
@@ -152,7 +159,10 @@ with scrape_tab:
             help="Controla cuantas veces se desplaza la lista de resultados en Google Maps. Para pais completo o rubros grandes, 80, 120 o mas puede ser necesario.",
         )
 
-    st.caption("Sugerencia: si es tu primera corrida o Google te muestra CAPTCHA, desactiva el modo Headless para ver el navegador.")
+    if IS_HOSTED_STREAMLIT:
+        st.caption("Entorno web detectado: el navegador se ejecuta en modo headless y depende de las librerias del archivo `packages.txt`.")
+    else:
+        st.caption("Sugerencia: si es tu primera corrida o Google te muestra CAPTCHA, desactiva el modo Headless para ver el navegador.")
 
     run_button = st.button("Iniciar scraping", type="primary")
 
@@ -193,8 +203,11 @@ with scrape_tab:
                         results.append(result)
             except Exception as exc:
                 st.error(f"La corrida fallo: {exc}")
-                if "playwright install chromium" in str(exc):
+                error_text = str(exc)
+                if "playwright install chromium" in error_text:
                     st.info("Si tu entorno bloquea la descarga automatica del navegador, ejecuta `playwright install chromium` en la terminal del servidor o entorno donde corre Streamlit.")
+                if "packages.txt" in error_text or "libglib2.0-0" in error_text or "headless" in error_text:
+                    st.info("Si esto ocurre en Streamlit web, revisa que el repo incluya `packages.txt` con las dependencias Linux de Chromium y vuelve a desplegar la app.")
                 st.stop()
 
             st.success("Scraping finalizado")

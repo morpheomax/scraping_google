@@ -2,6 +2,7 @@
 """Scraper generico de Google Maps reutilizable por consola o Streamlit."""
 
 import csv
+import asyncio
 import random
 import re
 import subprocess
@@ -17,6 +18,17 @@ from playwright.sync_api import sync_playwright
 import config
 from countries import filter_anchors, get_country_config
 from export_utils import export_country_excel, normalize_phone, normalize_text
+
+
+def ensure_windows_event_loop_policy():
+    if sys.platform != "win32":
+        return
+    policy_class = getattr(asyncio, "WindowsProactorEventLoopPolicy", None)
+    if policy_class is None:
+        return
+    current_policy = asyncio.get_event_loop_policy()
+    if not isinstance(current_policy, policy_class):
+        asyncio.set_event_loop_policy(policy_class())
 
 
 CSV_COLUMNS = [
@@ -85,9 +97,10 @@ def extract_place_id(href):
     return match.group(1) if match else href
 
 
-def build_search_url(query, lat, lng, zoom, query_suffix):
-    effective_query = f"{normalize_text(query)} en {query_suffix}" if query_suffix else normalize_text(query)
-    return f"https://www.google.com/maps/search/{urllib.parse.quote(effective_query)}/@{lat},{lng},{zoom}z"
+def build_search_url(query, lat, lng, zoom):
+    # Mantiene el comportamiento original: la geografia la define el ancla,
+    # no la frase de busqueda. Esto evita alterar resultados frente al script base.
+    return f"https://www.google.com/maps/search/{urllib.parse.quote(normalize_text(query))}/@{lat},{lng},{zoom}z"
 
 
 def ensure_chromium_installed(log_callback=None):
@@ -113,6 +126,33 @@ def ensure_chromium_installed(log_callback=None):
 
     if log_callback:
         log_callback("[SETUP] Chromium instalado correctamente.")
+
+
+def format_playwright_runtime_error(exc, headless):
+    error_text = str(exc)
+    missing_library_markers = [
+        "error while loading shared libraries",
+        "libglib-2.0.so.0",
+        "libglib2.0-0",
+        "host system is missing dependencies",
+    ]
+
+    if any(marker in error_text for marker in missing_library_markers):
+        return RuntimeError(
+            "Chromium no pudo iniciar porque faltan dependencias Linux del sistema. "
+            "En despliegues web agrega `packages.txt` en la raiz del repo y vuelve a desplegar. "
+            "La libreria faltante reportada por Playwright aparece en el detalle original.\n"
+            f"Detalle:\n{error_text}"
+        )
+
+    if config.is_hosted_streamlit_environment() and not headless:
+        return RuntimeError(
+            "El entorno web requiere ejecutar Chromium en modo headless. "
+            "La app lo fuerza automaticamente en Streamlit web; si el error persiste, revisa el despliegue actual.\n"
+            f"Detalle:\n{error_text}"
+        )
+
+    return exc
 
 
 def scroll_and_collect_links(page, max_scrolls):
@@ -224,6 +264,7 @@ def run_scraper(
     state_dir=None,
     log_callback=None,
 ):
+    ensure_windows_event_loop_policy()
     country = get_country_config(country_name)
     anchors = filter_anchors(country_name, selected_anchor_names)
     queries = [normalize_text(query) for query in search_queries if normalize_text(query)]
@@ -232,6 +273,8 @@ def run_scraper(
 
     campaign = campaign_name or config.DEFAULT_CAMPAIGN_NAME
     headless = config.HEADLESS if headless is None else headless
+    if config.is_hosted_streamlit_environment():
+        headless = True
     visit_details = config.VISIT_DETAILS if visit_details is None else visit_details
     max_scrolls = config.MAX_SCROLLS_PER_SEARCH if max_scrolls is None else max_scrolls
     delay_between_detail_pages = delay_between_detail_pages or config.DELAY_BETWEEN_DETAIL_PAGES
@@ -256,15 +299,18 @@ def run_scraper(
         except Exception as exc:
             error_text = str(exc)
             if "Executable doesn't exist" not in error_text and "Executable doesn't exist at" not in error_text:
-                raise
+                raise format_playwright_runtime_error(exc, headless) from exc
             ensure_chromium_installed(log_callback=log_callback)
-            browser = playwright.chromium.launch(headless=headless)
+            try:
+                browser = playwright.chromium.launch(headless=headless)
+            except Exception as retry_exc:
+                raise format_playwright_runtime_error(retry_exc, headless) from retry_exc
         context = browser.new_context(locale=country["locale"])
         search_page = context.new_page()
 
         for query in queries:
             for anchor_name, lat, lng, zoom in anchors:
-                url = build_search_url(query, lat, lng, zoom, country.get("query_suffix", country_name))
+                url = build_search_url(query, lat, lng, zoom)
                 log(f"[BUSCANDO] '{query}' en {anchor_name} -> {url}")
 
                 try:
